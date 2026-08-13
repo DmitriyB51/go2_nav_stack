@@ -1,0 +1,72 @@
+# Domain bridge for LIVE localization over WiFi.
+#
+# The Unitree lidar app is bare-DDS and only delivers when CycloneDDS is bound to a
+# SINGLE WIRED interface, so Point-LIO and the matcher must live on domain 0
+# (wired, on the dog) while RViz runs on domain 1 (WiFi, laptop).
+#
+# Only light topics cross: the heavy /registered_scan stays on the robot — that is
+# the whole point of running the matcher on the dog. /localization/map is ~105k
+# points but latched, i.e. sent once.
+
+name: go2_loc_bridge
+
+topics:
+
+  # ---------- dog -> laptop: what RViz displays ----------
+
+  # localized pose (red arrow + blue trail)
+  /localization/pose:
+    type: nav_msgs/msg/Odometry
+    from_domain: 0
+    to_domain: 1
+
+  # match quality: ~0.006-0.02 = healthy lock
+  /localization/fitness:
+    type: std_msgs/msg/Float32
+    from_domain: 0
+    to_domain: 1
+
+  # prior map (grey background). Latched -> must stay latched on the far side,
+  # or a late RViz sees nothing
+  /localization/map:
+    type: sensor_msgs/msg/PointCloud2
+    from_domain: 0
+    to_domain: 1
+    qos:
+      durability: transient_local
+      reliability: reliable
+      history: keep_last
+      depth: 1
+
+  # map->camera_init (matcher) + camera_init->aft_mapped (odometry); RViz needs both
+  /tf:
+    type: tf2_msgs/msg/TFMessage
+    from_domain: 0
+    to_domain: 1
+
+  /tf_static:
+    type: tf2_msgs/msg/TFMessage
+    from_domain: 0
+    to_domain: 1
+    qos:
+      durability: transient_local
+      reliability: reliable
+      history: keep_last
+      depth: 100
+
+
+  # aligned live scan (yellow). ~41 KB/s — the voxel-downsampled window, not raw
+  # lidar. Main visual confirmation that the scan sits on the map.
+  /localization/aligned_cloud:
+    type: sensor_msgs/msg/PointCloud2
+    from_domain: 0
+    to_domain: 1
+
+  # ---------- laptop -> dog: control ----------
+
+  # "2D Pose Estimate". Without this reverse bridge the initial pose cannot be
+  # corrected from the laptop — our most important manual control during a run.
+  /initialpose:
+    type: geometry_msgs/msg/PoseWithCovarianceStamped
+    from_domain: 1
+    to_domain: 0

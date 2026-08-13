@@ -1,0 +1,38 @@
+# --- data / outputs (never commit — big, per-run) ---
+*.simplemap
+*.mm
+*.tum
+*.ply
+*.las
+*.pcd
+*.rawlog
+*.3Dscene
+*.db3
+*.log
+plio_out/
+*_Images/
+rosbag2_*/
+maps/
+
+# per-run generated pipeline (from lc_manual.template.yaml)
+pipelines/lc_manual.yaml
+
+# --- ROS/colcon build artifacts ---
+build/
+install/
+log/
+
+# --- python ---
+__pycache__/
+*.pyc
+
+# camera recordings (video_record.py output) — big, keep out of git
+*.h264
+*.mp4
+
+# third-party debian sources fetched while investigating nav2_rotation_shim (dead end)
+ros-humble-*
+
+# view_frames TF graph dumps
+frames_*.gv
+frames_*.pdf

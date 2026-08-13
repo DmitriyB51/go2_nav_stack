@@ -1,0 +1,64 @@
+map_matcher_node:
+  ros__parameters:
+    # ⚠️ Старая офлайн-тройка, оставлена намеренно: бэг loc_test_2_1_plio +
+    #    final_map_lc.pcd + building_old.yaml — самосогласована, и это единственный
+    #    бэг с /registered_scan, который матчер может играть напрямую.
+    #    Живую карту (reloc2_gravity.pcd + building_reloc2.yaml) сюда не подставить:
+    #    бэг reloc2 писался тремя лёгкими топиками, /registered_scan надо
+    #    восстанавливать (~/maps/body2world.py). Тройки не смешивать.
+    map_path: /home/dmitriyb51/maps/final_map_lc.pcd
+
+    # downsampling (validated on plio_out: sub-second GICP, fitness ~0.004)
+    map_voxel: 0.15      # prior map / GICP target [m]
+    scan_voxel: 0.20     # accumulated scan window [m]
+
+    window_sec: 1.0            # accumulate /registered_scan over this [s]
+    match_every_m: 0.3         # re-match after this much travel [m] ...
+    match_min_interval_s: 1.0  # ... OR at least this often, so a turn keeps matching
+    crop_radius: 30.0    # reserved (target set once for this small map)
+
+    # gicp | ndt. NDT here was slower AND far worse (fitness 0.11-0.36 vs 0.004)
+    registration: gicp
+    gicp_max_corr_dist: 0.8
+    gicp_max_iter: 15
+    gicp_transform_eps: 0.0001
+    ndt_resolution: 1.0
+
+    fitness_thresh: 0.3
+    # reject a correction jumping more than this in one step (GICP sliding through a
+    # wall); first lock and /initialpose exempt
+    max_correction_jump: 1.0
+    # ...unless fitness is below this: a confident re-lock at a turn, not a slide.
+    # Holding a drifting pose = walking through walls.
+    strong_fitness: 0.03
+
+    # soft Z pin toward the floor on ACCEPTED matches only — cancels Point-LIO's
+    # Z-drift before it becomes an unrecoverable gap
+    z_constraint_enable: true
+    z_pin_gain: 0.5          # fraction of the Z error corrected per match
+    floor_z: 1.0e9           # sentinel = auto-capture from first lock
+    # hard Z pin every publish, independent of match success -> the pose never dives
+    # during a lock loss and the guess stays at floor, so re-lock is near-instant.
+    # Flat floor assumed.
+    planar_z_hold: true
+
+    # after N consecutive rejects: re-project the guess Z to the floor + small
+    # Z-sweep, accept a good re-lock bypassing the jump gate
+    recovery_enable: true
+    recovery_after_n: 5
+    recovery_z_range: 3.0    # +/- sweep [m]
+    recovery_z_step: 0.5
+
+    # frames + topics from Point-LIO — do not change unless the engine changes
+    map_frame: map
+    world_frame: camera_init
+    base_frame: aft_mapped
+    scan_topic: /registered_scan
+    odom_topic: /state_estimation
+
+    # aft_mapped is ~117 deg off physical 'forward' (transform_everything.py).
+    # Display-only rotation of the published pose.
+    heading_offset_deg: -117.0
+
+    # initial map->camera_init [x, y, z, roll, pitch, yaw]; identity = start at origin
+    initial_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]

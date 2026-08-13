@@ -1,0 +1,102 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+    Tree Height: 600
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 60
+      Color: 60; 60; 60
+      Alpha: 0.2
+      Reference Frame: <Fixed Frame>
+    # ── СТЕНЫ: готовая карта фоном, серым. Видна сразу, ещё до старта бэга,
+    #    поэтому всегда понятно, где робот находится в здании.
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Карта (стены)
+      Enabled: true
+      Topic:
+        Value: /prior_map
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Style: Points
+      Size (Pixels): 1
+      Alpha: 0.35
+      Decay Time: 0
+      Color Transformer: FlatColor
+      Color: 150; 150; 150
+    # ── ЧТО ВИДИТ ЛИДАР ПРЯМО СЕЙЧАС: яркий свежий скан.
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Лидар сейчас
+      Enabled: true
+      Topic:
+        Value: /cloud_registered_body
+        Depth: 2
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+      Style: Points
+      Size (Pixels): 4
+      Decay Time: 0
+      Color Transformer: FlatColor
+      Color: 255; 40; 40
+    # ── СЛЕД: те же сканы, но НЕ стираются 60 секунд — видно, что робот уже осмотрел.
+    #    ⚠️ Decay Time = 0 означает «показывать ТОЛЬКО последнее облако», а не
+    #    «хранить вечно». Именно поэтому нужен отдельный дисплей с большим временем.
+    - Class: rviz_default_plugins/PointCloud2
+      Name: След сканов (60 с)
+      Enabled: true
+      Topic:
+        Value: /cloud_registered_body
+        Depth: 10
+        Durability Policy: Volatile
+        Reliability Policy: Best Effort
+      Style: Points
+      Size (Pixels): 2
+      Decay Time: 60
+      Color Transformer: AxisColor
+      Axis: Z
+      Autocompute Value Bounds: false
+      Min Value: -1
+      Max Value: 2.5
+    # ── ГДЕ РОБОТ: оси кадра body.
+    - Class: rviz_default_plugins/TF
+      Name: Робот
+      Enabled: true
+      Show Names: false
+      Show Axes: true
+      Show Arrows: false
+      Marker Scale: 3
+      Frames:
+        All Enabled: true
+  Global Options:
+    Background Color: 20; 20; 25
+    Fixed Frame: camera_init
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 55
+      Pitch: 1.2
+      Yaw: 3.9
+      Focal Point:
+        X: 6
+        Y: 13
+        Z: 0
+      Target Frame: <Fixed Frame>
+Window Geometry:
+  Height: 900
+  Width: 1500
+  Displays:
+    collapsed: false

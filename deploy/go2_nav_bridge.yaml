@@ -1,0 +1,101 @@
+# Domain bridge for LIVE NAVIGATION over WiFi. Superset of go2_loc_bridge.yaml —
+# use this INSTEAD of it when navigating.
+#
+#   domain 0 = wired on the dog (the Unitree lidar app is bare-DDS and only
+#              delivers on a single wired binding) -> Point-LIO, matcher, Nav2
+#   domain 1 = WiFi on the laptop -> RViz only
+#
+# The heavy /registered_scan and the costmap internals stay on the robot.
+
+name: go2_nav_bridge
+
+topics:
+
+  # ---- dog -> laptop: localization (same as go2_loc_bridge.yaml) ----
+  /localization/pose:
+    type: nav_msgs/msg/Odometry
+    from_domain: 0
+    to_domain: 1
+
+  /localization/fitness:
+    type: std_msgs/msg/Float32
+    from_domain: 0
+    to_domain: 1
+
+  # latched -> must stay latched on the far side, or a late RViz sees nothing
+  /localization/map:
+    type: sensor_msgs/msg/PointCloud2
+    from_domain: 0
+    to_domain: 1
+    qos:
+      durability: transient_local
+      reliability: reliable
+      history: keep_last
+      depth: 1
+
+  /localization/aligned_cloud:
+    type: sensor_msgs/msg/PointCloud2
+    from_domain: 0
+    to_domain: 1
+
+  /tf:
+    type: tf2_msgs/msg/TFMessage
+    from_domain: 0
+    to_domain: 1
+
+  /tf_static:
+    type: tf2_msgs/msg/TFMessage
+    from_domain: 0
+    to_domain: 1
+    qos:
+      durability: transient_local
+      reliability: reliable
+      history: keep_last
+      depth: 100
+
+  # ---- dog -> laptop: navigation ----
+
+  # 2D building map, latched: costs nothing ongoing, but the QoS MUST be
+  # transient_local or a late RViz sees no map
+  /map:
+    type: nav_msgs/msg/OccupancyGrid
+    from_domain: 0
+    to_domain: 1
+    qos:
+      durability: transient_local
+      reliability: reliable
+      history: keep_last
+      depth: 1
+
+  # planned route (green line), tiny
+  /plan:
+    type: nav_msgs/msg/Path
+    from_domain: 0
+    to_domain: 1
+
+  # what the controller commands — intent, visible before the legs react
+  /cmd_vel:
+    type: geometry_msgs/msg/Twist
+    from_domain: 0
+    to_domain: 1
+
+  # 6x6 m @ 0.05 = ~14 KB per update at 5 Hz; comment out if WiFi gets tight.
+  # global_costmap is deliberately NOT bridged (~640 KB/update, whole building).
+  /local_costmap/costmap:
+    type: nav_msgs/msg/OccupancyGrid
+    from_domain: 0
+    to_domain: 1
+
+  # ---- laptop -> dog: control. Without these the RViz buttons do nothing. ----
+
+  # "Nav2 Goal" — reverse direction, easy to forget (same trap as /initialpose)
+  /goal_pose:
+    type: geometry_msgs/msg/PoseStamped
+    from_domain: 1
+    to_domain: 0
+
+  # "2D Pose Estimate" — manual localization correction
+  /initialpose:
+    type: geometry_msgs/msg/PoseWithCovarianceStamped
+    from_domain: 1
+    to_domain: 0

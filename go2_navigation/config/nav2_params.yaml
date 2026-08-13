@@ -1,0 +1,244 @@
+# nav2_params.yaml — конфигурация Nav2 для Go2.
+#
+# Нестандартное здесь:
+#   • нет amcl — локализацию даёт map_matcher_node (публикует map->camera_init);
+#   • кадр одометрии зовётся camera_init, а не odom (так его назвал Point-LIO);
+#   • четвероногий: footprint 0.7x0.3 м, умеет крутиться на месте;
+#   • препятствия local costmap — из /cloud_registered_body (см. блок costmap).
+
+# --- BT NAVIGATOR: принимает цель, крутит дерево поведения ------------------
+bt_navigator:
+  ros__parameters:
+    global_frame: map
+    robot_base_frame: base_link      # центр робота на полу (static TF от aft_mapped)
+    odom_topic: /state_estimation
+    bt_loop_duration: 10
+    default_server_timeout: 20
+    # дерево по умолчанию из nav2 — своего не нужно
+
+# --- PLANNER: глобальный путь по карте здания (NavFn) -----------------------
+planner_server:
+  ros__parameters:
+    expected_planner_frequency: 1.0
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_navfn_planner/NavfnPlanner"
+      tolerance: 0.5          # принять точку в 0.5 м от цели, если точно нельзя
+      use_astar: true
+      allow_unknown: false    # не планировать через серое, иначе поедет сквозь дыру в стене
+
+# --- CONTROLLER (RPP): ведёт вдоль пути ------------------------------------
+# ⛔ Живьём НЕ поднимается (nav2_live.launch.py), его заменил simple_controller.py.
+# Блок оставлен для nav2_stage4.launch.py и на случай возврата RPP.
+controller_server:
+  ros__parameters:
+    controller_frequency: 20.0
+    # сторож "робот вообще движется?". ⚠️ Офлайн срабатывает ВСЕГДА (робот в бэге
+    # не слушает /cmd_vel) — это ожидаемо, смотрим на команды, а не на слежение
+    progress_checker_plugin: "progress_checker"
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.5
+      movement_time_allowance: 10.0
+    general_goal_checker:
+      stateful: True
+      plugin: "nav2_controller::SimpleGoalChecker"
+      xy_goal_tolerance: 0.25
+      # курс в цели НЕ проверяем (3.14 = всё равно куда смотрит): иначе робот
+      # доворачивался под стрелку на ~120°, а ROTATE_ASSIST_VX уводил его С цели
+      # (dgoal 0.02 -> 0.48). Нам нужна точка, а не поза. Верни 0.26, если курс важен.
+      yaw_goal_tolerance: 3.14
+    goal_checker_plugins: ["general_goal_checker"]
+    controller_plugins: ["FollowPath"]
+    FollowPath:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      # ⚠️ Ниже 0.3 м/с эта собака ходит плохо — это порог исполнения, а не вкус:
+      # Nav2 исправно шлёт команды, собака их плохо отрабатывает. Понижать "ради
+      # безопасности" здесь ВРЕДНО. У CMU maxSpeed = 1.0, то есть ограничение не в
+      # собаке, а в нас: 2D-costmap + матчинг реагируют медленнее live-3D
+      # terrain_analysis, и аппаратного E-STOP нет -> идём вверх ступенями.
+      # Зазор до regulated_linear_scaling_min_speed обязателен: пока они были равны,
+      # сброс скорости на кривизне физически не мог сработать и собака входила в
+      # каждый поворот на полном крейсере (одна из причин овершута).
+      desired_linear_vel: 0.5
+      regulated_linear_scaling_min_speed: 0.3
+      # lookahead 0.5 = lookAheadDis из CMU pathFollower. Короче = меньше срезания
+      # углов и чаще срабатывает разворот НА МЕСТЕ (его собака делает штатно), тогда
+      # как дуга на резком угле требует ω ~1.0 рад/с на ходу — а исполнит ли её гейт,
+      # не факт, отсюда недоворот и овершут в стену.
+      lookahead_dist: 0.5
+      min_lookahead_dist: 0.25
+      max_lookahead_dist: 0.9
+      # ⚠️ RPP при развороте жёстко ставит linear_vel = 0.0, параметра нет, а у этой
+      # собаки на чистом vx=0 + angular.z ЛАПЫ ЗАСТРЕВАЮТ. Небольшой "вперёд"
+      # добавляет наш мост (ROTATE_ASSIST_VX в vel_ctrl_repub.cpp) — это свойство
+      # робота, ему место в мосте, а не в конфиге Nav2.
+      use_rotate_to_heading: true
+      # порог угла [рад], выше которого доворачиваем на месте, а не выписываем дугу.
+      # ⛔ Подъём до 0.7 был ошибкой: лог turn0.csv показал, что предельного цикла нет
+      # (перекладка ровно одна), а проблема — ЗАДЕРЖКА ИСПОЛНЕНИЯ. При 0.7 RPP бросал
+      # доворот с ошибкой ещё 40° и ехал вперёд 0.4 м/с, робот из-за отставания
+      # продолжал крутиться -> проскок -> RPP крутит обратно, не переставая ехать
+      # (t=97..99 в логе, едва не влетел в стену). Меньший порог = дольше доворачиваем
+      # стоя и только потом едем.
+      rotate_to_heading_min_angle: 0.4
+      # 1.4 = maxYawRate из CMU pathFollower (80°/с) и maxSpeedYaw в vel_ctrl_repub.cpp,
+      # то есть полная шкала джойстика. До этого крутились на 57 % от проверенного.
+      rotate_to_heading_angular_vel: 1.4
+      # ⭐ НЕ СНИЖАТЬ: это не плавность, а потолок скорости доворота.
+      # RPP ограничивает команду относительно ИЗМЕРЕННОЙ угловой скорости:
+      #   angular_vel = clamp(±rotate_to_heading_angular_vel,
+      #                       curr_speed.angular.z ± max_angular_accel * dt), dt = 1/20.
+      # Point-LIO всегда отдаёт twist.angular.z = 0, поэтому разогнаться выше
+      # max_angular_accel*dt невозможно в принципе. При 1.5 первая команда выходила
+      # 0.075 рад/с (4°/с), робот не шевелился, одометрия оставалась 0 — команда
+      # залипала навсегда, при живом на вид /cmd_vel.
+      # Инвариант: max_angular_accel >= rotate_to_heading_angular_vel / dt = 1.4/0.05.
+      max_angular_accel: 28.0
+      use_regulated_linear_velocity_scaling: true
+      use_cost_regulated_linear_velocity_scaling: false
+      allow_reversing: false        # Go2 умеет назад, но пока проще без реверса
+
+# --- GLOBAL COSTMAP: статичная карта здания + раздувание стен ---------------
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      update_frequency: 1.0
+      publish_frequency: 1.0
+      global_frame: map
+      robot_base_frame: base_link
+      # габарит корпуса Go2 ~0.7 (X) x 0.3 (Y) м = 4 угла вокруг base_link
+      footprint: "[ [0.35, 0.15], [0.35, -0.15], [-0.35, -0.15], [-0.35, 0.15] ]"
+      resolution: 0.05
+      track_unknown_space: true     # иначе allow_unknown:false не сработает
+      plugins: ["static_layer", "inflation_layer"]
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        # ~полуширина типового коридора (замер по карте: p75 = 0.85 м) — градиенты от
+        # двух стен встречаются в центре, путь идёт по середине. Выше 0.85 не ставить:
+        # узкие дверные проёмы станут "дорогими" и робот их обойдёт.
+        inflation_radius: 0.80
+        cost_scaling_factor: 2.0    # ниже = площе градиент = сильнее притяг к центру
+
+# --- LOCAL COSTMAP: окно вокруг робота, живой лидар -------------------------
+# Ловит то, чего нет на статичной карте: люди, коробки, сдвинутая мебель.
+#
+# ⚠️ Ключ называется costmap, а не local_costmap: раньше её поднимал
+# controller_server своим под-узлом, а теперь это отдельный узел
+# `ros2 run nav2_costmap_2d nav2_costmap_2d`, который ЖЁСТКО зовёт себя costmap
+# (имя зашито в Costmap2DROS("costmap"), из launch не переименовать — NodeOptions
+# внутри узла перебивают аргументы). При неверном ключе НИ ОДИН параметр не
+# применится, узел молча поднимется на умолчаниях (пустые плагины = вечно пустая
+# карта = робот слеп), и ошибки в логе не будет.
+# Топики remap-нуты в launch обратно к /local_costmap/... — их ждут мост и RViz.
+# Вернёшь RPP — переименуй ключ обратно в local_costmap: local_costmap:.
+costmap:
+  costmap:
+    ros__parameters:
+      update_frequency: 5.0
+      publish_frequency: 5.0
+      # ⚠️ Обычная практика Nav2 — кадр одометрии, но ЗДЕСЬ ЭТО НЕ РАБОТАЕТ.
+      # Замер на роботе: пол в camera_init наклонён на 21°, толщина подгонки
+      # плоскости 0.141 м (каша); в map — 7.6° и 0.034 м (чёткая плоскость).
+      # Причина известна: Point-LIO гиро-онли (акселерометр L1 обнулён), гравитацию
+      # не наблюдает, и camera_init наследует наклон крепления на момент запуска.
+      # min/max_obstacle_height применяется ПОСЛЕ перевода облака в global_frame,
+      # поэтому в наклонённом кадре пол уезжает по z на метры и метится как
+      # препятствие: костмап заполнялся сплошным веером фантомных стен.
+      # ЦЕНА: костмап наследует скачки коррекции матчера. При fitness 0.005-0.02 они
+      # мелкие; станут заметны — лечить выравниванием карты, camera_init не вернуть.
+      global_frame: map
+      robot_base_frame: base_link
+      rolling_window: true
+      width: 6
+      height: 6
+      resolution: 0.05
+      footprint: "[ [0.35, 0.15], [0.35, -0.15], [-0.35, -0.15], [-0.35, 0.15] ]"
+      plugins: ["obstacle_layer", "inflation_layer"]
+      # ⚠️ /registered_scan здесь НЕ работает: это накопленное облако в МИРОВОМ кадре,
+      # и obstacle_layer берёт "начало сенсора" = origin кадра облака = (0,0)
+      # неподвижно. Раз сенсор всегда в (0,0), а робот уехал, raytrace-очистка
+      # невозможна ("Sensor origin out of map bounds") -> всё облако висит
+      # препятствиями -> RPP кричит "collision ahead!". obstacle_layer ждёт скан ИЗ
+      # ТОЧКИ сенсора. /cloud_registered_body — облако в кадре ТЕЛА, движется с
+      # роботом, origin сенсора = где робот стоит -> очистка работает.
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        observation_sources: pointcloud
+        pointcloud:
+          topic: /cloud_registered_body   # сенсорный кадр, НЕ мировой /registered_scan
+          data_type: "PointCloud2"
+          marking: true
+          clearing: true
+          # Высоты задаются в кадре global_frame (= map), а НЕ в кадре облака: Nav2
+          # сначала переводит облако, потом режет по z. Замер на роботе: пол -0.566 м
+          # на 1 м -> -0.720 м на 5 м (остаточный наклон 7.6°), base_link на -0.58 м.
+          # -0.45 гарантированно выше пола на всём диапазоне -> пол не метится, а
+          # препятствия выше ~0.12 м над полом ловятся.
+          # ⚠️ Из-за остаточных 7.6° при повороте пол может подняться выше порога.
+          # Настоящее лечение — выровнять прайор-карту, а не подбирать это число.
+          min_obstacle_height: -0.45
+          max_obstacle_height: 1.5    # выше +0.4 м L1 почти ничего не видит
+          # самозасвет: в пределах 1 м лидар видит СОБСТВЕННЫЕ лапы (точки от -0.57 до
+          # -0.155 м). Без отсечки робот считает препятствием сам себя. 0.8 — то же
+          # число, что --body-radius в bag_to_grid.py
+          obstacle_min_range: 0.8
+          raytrace_min_range: 0.8
+          # дальность урезана: чем дальше точка, тем сильнее врут остаточные 7.6°
+          obstacle_max_range: 3.0
+          raytrace_max_range: 3.5
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.80        # заодно с global_costmap, пояснение там
+        cost_scaling_factor: 2.0
+
+# --- MAP SERVER: yaml_filename задаётся из launch абсолютным путём ----------
+map_server:
+  ros__parameters:
+    yaml_filename: ""
+
+# --- BEHAVIOR SERVER: что делать, когда застряли ----------------------------
+behavior_server:
+  ros__parameters:
+    local_costmap_topic: local_costmap/costmap_raw
+    global_costmap_topic: global_costmap/costmap_raw
+    local_frame: map        # согласовано с costmap.global_frame, пояснение там
+    global_frame: map
+    robot_base_frame: base_link
+    behavior_plugins: ["spin", "backup", "wait"]
+    spin:
+      plugin: "nav2_behaviors/Spin"
+    backup:
+      plugin: "nav2_behaviors/BackUp"
+    wait:
+      plugin: "nav2_behaviors/Wait"
+
+# --- VELOCITY SMOOTHER ------------------------------------------------------
+# ⚠️ Сейчас НЕ в живой цепочке (nav2_live его не поднимает, мост берёт сырой
+# /cmd_vel). Если включать — держать потолки заодно с desired_linear_vel и
+# rotate_to_heading_angular_vel: со старым vyaw=0.4 он навязал бы минимальный
+# радиус R = v/ω = 0.75 м, и на всех углах теснее этого был бы гарантированный
+# овершут; со старым vx=0.3 он молча срезал бы крейсер.
+velocity_smoother:
+  ros__parameters:
+    max_velocity: [0.5, 0.0, 1.4]     # [vx, vy, vyaw]; vy=0 — боком пока не ходим
+    min_velocity: [-0.5, 0.0, -1.4]
+    # разгон плавный, торможение резкое (быстро встать = безопасно)
+    max_accel: [0.5, 0.0, 1.0]
+    max_decel: [-1.5, 0.0, -2.0]
+
+# --- LIFECYCLE MANAGER ------------------------------------------------------
+# "Ничего не работает" -> первым делом смотри, все ли узлы стали active.
+lifecycle_manager_navigation:
+  ros__parameters:
+    autostart: true
+    node_names:
+      - map_server
+      - planner_server
+      - controller_server
+      - behavior_server
+      - velocity_smoother
+      - bt_navigator

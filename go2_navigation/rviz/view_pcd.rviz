@@ -1,0 +1,43 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 5
+      Plane Cell Count: 40
+      Color: 70; 70; 70
+      Alpha: 0.3
+    - Class: rviz_default_plugins/PointCloud2
+      Name: PCD
+      Enabled: true
+      Topic:
+        Value: /prior_map
+        Depth: 1
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Style: Points
+      Size (Pixels): 2
+      Decay Time: 0
+      Color Transformer: AxisColor
+      Axis: Z
+      Autocompute Value Bounds: true
+  Global Options:
+    Background Color: 20; 20; 25
+    Fixed Frame: map
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Measure
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Name: Current View
+      Distance: 90
+      Pitch: 1.3
+      Focal Point: {X: 15, Y: -10, Z: 0}
+Window Geometry:
+  Height: 900
+  Width: 1500
